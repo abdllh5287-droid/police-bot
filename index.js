@@ -1,10 +1,16 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder, RoleSelectMenuBuilder, ChannelSelectMenuBuilder, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder, RoleSelectMenuBuilder, PermissionFlagsBits } = require('discord.js');
 const express = require('express');
 
 const app = express();
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Police Bot Ultimate is online 24/7!'));
-app.listen(port, () => console.log(`Web server running on port ${port}`));
+
+app.get('/', (req, res) => {
+    res.send('Police Bot Ultimate is online 24/7!');
+});
+
+app.listen(port, () => {
+    console.log(`Web server running on port ${port}`);
+});
 
 const client = new Client({
     intents: [
@@ -15,38 +21,123 @@ const client = new Client({
     ]
 });
 
-const serverSettings = new Map(); // guildId -> { login: Set, logout: Set, break: Set, logChannel: null, protection: { antiLink: false, antiBot: false, antiSpam: false } }
+const serverSettings = new Map(); 
 const activeSessions = new Map(); 
 const weeklyStats = new Map();
-const userWarnings = new Map(); // guildId -> Map(userId -> count)
+const userWarnings = new Map();
 
 const tempDoomsSetup = new Map();
 const doomsSettings = new Map();
-const tempProtectionSetup = new Map();
 
 const FOOTER_TEXT = "صنع من قبل عبدالله (fr_lv)";
 
 const commands = [
-    new SlashCommandBuilder().setName('help').setDescription('عرض لوحة المساعدة والأوامر الاحترافية الخاصة بالبوت'),
-    new SlashCommandBuilder().setName('add-login').setDescription('إضافة روم مخصص لتسجيل الدخول').addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
-    new SlashCommandBuilder().setName('remove-login').setDescription('إزالة روم من رومات تسجيل الدخول').addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
-    new SlashCommandBuilder().setName('add-logout').setDescription('إضافة روم مخصص لتسجيل الخروج').addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
-    new SlashCommandBuilder().setName('remove-logout').setDescription('إزالة روم من رومات تسجيل الخروج').addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
-    new SlashCommandBuilder().setName('add-break').setDescription('إضافة روم مخصص للبريك').addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
-    new SlashCommandBuilder().setName('remove-break').setDescription('إزالة روم من رومات البريك').addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
-    new SlashCommandBuilder().setName('hours').setDescription('عرض ساعات خدمة العضو الأسبوعية').addStringOption(o => o.setName('user_id').setDescription('آيدي العضو').setRequired(true)),
-    new SlashCommandBuilder().setName('dooms').setDescription('إعداد نظام التفعيل والأزرار في السيرفر'),
-    new SlashCommandBuilder().setName('protection').setDescription('فتح لوحة نظام حماية السيرفر المتقدمة'),
-    new SlashCommandBuilder().setName('ban').setDescription('حظر عضو من السيرفر').addUserOption(o => o.setName('target').setDescription('العضو').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('السبب').setRequired(false)),
-    new SlashCommandBuilder().setName('unban').setDescription('فك الحظر عن عضو بالآيدي').addUserOption(o => o.setName('target_id').setDescription('آيدي العضو').setRequired(true)),
-    new SlashCommandBuilder().setName('timeout').setDescription('إسكات عضو لفترة زمنية (ميوت مؤقت)').addUserOption(o => o.setName('target').setDescription('العضو').setRequired(true)).addIntegerOption(o => o.setName('minutes').setDescription('عدد الدقائق').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('السبب').setRequired(false)),
-    new SlashCommandBuilder().setName('untimeout').setDescription('رفع الميوت عن عضو').addUserOption(o => o.setName('target').setDescription('العضو').setRequired(true)),
-    new SlashCommandBuilder().setName('kick').setDescription('طرد عضو من السيرفر').addUserOption(o => o.setName('target').setDescription('العضو').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('السبب').setRequired(false)),
-    new SlashCommandBuilder().setName('clear').setDescription('مسح الرسائل').addIntegerOption(o => o.setName('count').setDescription('العدد (1-100)').setRequired(true)),
-    new SlashCommandBuilder().setName('warning').setDescription('إعطاء تحذير لعضو أو كشف تحذيراته').addUserOption(o => o.setName('target').setDescription('العضو').setRequired(true)).addStringOption(o => o.setName('action').setDescription('اختر العملية').setRequired(true).addChoices({ name: 'إعطاء تحذير (Add)', value: 'add' }, { name: 'إزالة تحذير (Remove)', value: 'remove' }, { name: 'فحص التحذيرات (Check)', value: 'check' })),
-    new SlashCommandBuilder().setName('broadcast').setDescription('إرسال برودكاست رسمي لكل أعضاء السيرفر بالمنشن أو بدون').addStringOption(o => o.setName('message').setDescription('نص الإعلان').setRequired(true)),
-    new SlashCommandBuilder().setName('say').setDescription('جعل البوت ينطق رسالة في الشات').addStringOption(o => o.setName('message').setDescription('الرسالة').setRequired(true)),
-    new SlashCommandBuilder().setName('avatar').setDescription('عرض صورة بروفيسل أي عضو').addUserOption(o => o.setName('target').setDescription('العضو').setRequired(false))
+    new SlashCommandBuilder()
+        .setName('help')
+        .setDescription('عرض لوحة المساعدة والأوامر الاحترافية الخاصة بالبوت'),
+    
+    new SlashCommandBuilder()
+        .setName('add-login')
+        .setDescription('إضافة روم مخصص لتسجيل الدخول')
+        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
+    
+    new SlashCommandBuilder()
+        .setName('remove-login')
+        .setDescription('إزالة روم من رومات تسجيل الدخول')
+        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('add-logout')
+        .setDescription('إضافة روم مخصص لتسجيل الخروج')
+        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('remove-logout')
+        .setDescription('إزالة روم من رومات تسجيل الخروج')
+        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('add-break')
+        .setDescription('إضافة روم مخصص للبريك')
+        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('remove-break')
+        .setDescription('إزالة روم من رومات البريك')
+        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('hours')
+        .setDescription('عرض ساعات خدمة العضو الأسبوعية')
+        .addStringOption(o => o.setName('user_id').setDescription('آيدي العضو').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('dooms')
+        .setDescription('إعداد نظام التفعيل والأزرار في السيرفر'),
+
+    new SlashCommandBuilder()
+        .setName('protection')
+        .setDescription('فتح لوحة نظام حماية السيرفر المتقدمة'),
+
+    new SlashCommandBuilder()
+        .setName('ban')
+        .setDescription('حظر عضو من السيرفر')
+        .addUserOption(o => o.setName('target').setDescription('العضو').setRequired(true))
+        .addStringOption(o => o.setName('reason').setDescription('السبب').setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('unban')
+        .setDescription('فك الحظر عن عضو بالآيدي')
+        .addUserOption(o => o.setName('target_id').setDescription('آيدي العضو').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('timeout')
+        .setDescription('إسكات عضو لفترة زمنية (ميوت مؤقت)')
+        .addUserOption(o => o.setName('target').setDescription('العضو').setRequired(true))
+        .addIntegerOption(o => o.setName('minutes').setDescription('عدد الدقائق').setRequired(true))
+        .addStringOption(o => o.setName('reason').setDescription('السبب').setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('untimeout')
+        .setDescription('رفع الميوت عن عضو')
+        .addUserOption(o => o.setName('target').setDescription('العضو').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('kick')
+        .setDescription('طرد عضو من السيرفر')
+        .addUserOption(o => o.setName('target').setDescription('العضو').setRequired(true))
+        .addStringOption(o => o.setName('reason').setDescription('السبب').setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('clear')
+        .setDescription('مسح الرسائل')
+        .addIntegerOption(o => o.setName('count').setDescription('العدد (1-100)').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('warning')
+        .setDescription('إعطاء تحذير لعضو أو كشف تحذيراته')
+        .addUserOption(o => o.setName('target').setDescription('العضو').setRequired(true))
+        .addStringOption(o => o.setName('action').setDescription('اختر العملية').setRequired(true)
+            .addChoices(
+                { name: 'إعطاء تحذير (Add)', value: 'add' },
+                { name: 'إزالة تحذير (Remove)', value: 'remove' },
+                { name: 'فحص التحذيرات (Check)', value: 'check' }
+            )),
+
+    new SlashCommandBuilder()
+        .setName('broadcast')
+        .setDescription('إرسال برودكاست رسمي لكل أعضاء السيرفر')
+        .addStringOption(o => o.setName('message').setDescription('نص الإعلان').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('say')
+        .setDescription('جعل البوت ينطق رسالة في الشات')
+        .addStringOption(o => o.setName('message').setDescription('الرسالة').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('avatar')
+        .setDescription('عرض صورة بروفايل أي عضو')
+        .addUserOption(o => o.setName('target').setDescription('العضو').setRequired(false))
 ].map(command => command.toJSON());
 
 client.once('ready', async () => {
@@ -73,27 +164,30 @@ function getGuildSettings(guildId) {
 }
 
 function addWeeklyTime(guildId, userId, timeToAdd) {
-    if (!weeklyStats.has(guildId)) weeklyStats.set(guildId, new Map());
+    if (!weeklyStats.has(guildId)) {
+        weeklyStats.set(guildId, new Map());
+    }
     const guildMap = weeklyStats.get(guildId);
     const now = Date.now();
     const oneWeekMs = 7 * 24 * 60 * 60 * 1000;
+    
     let userData = guildMap.get(userId) || { totalMs: 0, lastReset: now };
+
     if (now - userData.lastReset > oneWeekMs) {
         userData.totalMs = 0;
         userData.lastReset = now;
     }
+
     userData.totalMs += timeToAdd;
     guildMap.set(userId, userData);
 }
 
-// مراقبة الحماية للرسائل (مانع الروابط والمخربين)
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
 
     const guildId = message.guild.id;
     const settings = getGuildSettings(guildId);
 
-    // نظام منع الروابط لو مفعل
     if (settings.protection.antiLink && !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
         if (message.content.includes('http://') || message.content.includes('https://') || message.content.includes('discord.gg/')) {
             await message.delete().catch(() => {});
@@ -111,13 +205,20 @@ client.on('messageCreate', async message => {
         if (!settings.login.has(channelId)) return message.reply('❌ يرجى استخدام الأمر في رومات تسجيل الدخول المخصصة فقط.');
         if (activeSessions.has(userId)) return message.reply('❌ أنت مسجل دخول بالفعل!');
 
-        activeSessions.set(userId, { loginTime: now, breakTime: 0, breakStart: null, isBreak: false });
+        activeSessions.set(userId, { 
+            loginTime: now, 
+            breakTime: 0, 
+            breakStart: null, 
+            isBreak: false 
+        });
+
         return message.reply(`✅ تم تسجيل دخولك بنجاح.\n💤 اكتب **غفوة** للبريك و **عودة** للاستئناف.\n\n_${FOOTER_TEXT}_`);
     }
 
     if (content === 'غفوة') {
         if (settings.break.size === 0) return message.reply('❌ لم يتم تعيين رومات للبريك!');
         if (!settings.break.has(channelId)) return message.reply('❌ استخدم الأمر في رومات البريك المخصصة فقط.');
+        
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
         if (session.isBreak) return message.reply('⚠️ أنت في بريك بالفعل!');
@@ -130,6 +231,7 @@ client.on('messageCreate', async message => {
     if (content === 'عودة') {
         if (settings.break.size === 0) return message.reply('❌ لم يتم تعيين رومات للبريك!');
         if (!settings.break.has(channelId)) return message.reply('❌ استخدم الأمر في رومات البريك المخصصة فقط.');
+        
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
         if (!session.isBreak) return message.reply('⚠️ أنت لست في بريك أساساً!');
@@ -143,11 +245,14 @@ client.on('messageCreate', async message => {
     if (content === 'تسجيل خروج') {
         if (settings.logout.size === 0) return message.reply('❌ لم يتم تعيين رومات لتسجيل الخروج!');
         if (!settings.logout.has(channelId)) return message.reply('❌ استخدم الأمر في رومات تسجيل الخروج المخصصة فقط.');
+        
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
 
         let totalBreak = session.breakTime;
-        if (session.isBreak && session.breakStart) totalBreak += (now - session.breakStart);
+        if (session.isBreak && session.breakStart) {
+            totalBreak += (now - session.breakStart);
+        }
 
         const netTime = Math.max(0, (now - session.loginTime) - totalBreak);
         addWeeklyTime(guildId, userId, netTime);
@@ -161,7 +266,6 @@ client.on('messageCreate', async message => {
     }
 });
 
-// حماية دخول البوتات الوهمية لو تم تفعيلها
 client.on('guildMemberAdd', async member => {
     const guildId = member.guild.id;
     const settings = getGuildSettings(guildId);
@@ -182,6 +286,7 @@ client.on('guildMemberAdd', async member => {
         .setColor(0x00FF00)
         .setFooter({ text: FOOTER_TEXT })
         .setTimestamp();
+    
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
@@ -197,6 +302,7 @@ client.on('guildMemberRemove', async member => {
         .setColor(0xFF0000)
         .setFooter({ text: FOOTER_TEXT })
         .setTimestamp();
+    
     logChannel.send({ embeds: [embed] }).catch(() => {});
 });
 
@@ -210,7 +316,7 @@ client.on('interactionCreate', async interaction => {
                 .setTitle('📜 قائمة المساعدة والأوامر الاحترافية - مود الشرطة RP8')
                 .setDescription('جميع الأوامر المتاحة في البوت مرتبة حسب الاستخدام:')
                 .addFields(
-                    { name: '🛡️ أرام الحماية والإدارة العليا', value: '`/protection`, `/ban`, `/unban`, `/timeout`, `/untimeout`, `/kick`, `/clear`, `/warning`', inline: false },
+                    { name: '🛡️ أوامر الحماية والإدارة العليا', value: '`/protection`, `/ban`, `/unban`, `/timeout`, `/untimeout`, `/kick`, `/clear`, `/warning`', inline: false },
                     { name: '📋 نظام التفعيل واللوق', value: '`/dooms`', inline: false },
                     { name: '⏱️ نظام رومات التحضير والدخول', value: '`/add-login`, `/remove-login`, `/add-logout`, `/remove-logout`, `/add-break`, `/remove-break`, `/hours`', inline: false },
                     { name: '📢 الإعلانات والأدوات العامة', value: '`/broadcast`, `/say`, `/avatar`, `/help`', inline: false }
@@ -324,7 +430,7 @@ client.on('interactionCreate', async interaction => {
             const minutes = options.getInteger('minutes');
             const reason = options.getString('reason') || 'بدون سبب';
             await target.timeout(minutes * 60 * 1000, reason);
-            return interaction.reply({ content: `✅ تم إعطاء ميوت (Timeout) للعضو بنجاح لمدة ${minutes} دقيقة.`, ephemeral: true });
+            return interaction.reply({ content: `✅ تم إعطاء ميوت للعضو بنجاح لمدة ${minutes} دقيقة.`, ephemeral: true });
         }
         else if (commandName === 'untimeout') {
             const target = options.getMember('target');
@@ -436,10 +542,34 @@ client.on('interactionCreate', async interaction => {
                     await targetMember.roles.add(settings.verifyRoleId);
                     await targetMember.roles.remove(settings.unverifyRoleId).catch(() => {});
                     await interaction.reply({ content: `✅ تم تفعيل العضو بنجاح وإرسال اللوق!`, ephemeral: true });
+                    if (logChannel) {
+                        const logEmbed = new EmbedBuilder()
+                            .setTitle('✅ لوق تفعيل عضو')
+                            .addFields(
+                                { name: 'الإداري', value: `<@${interaction.user.id}>`, inline: false },
+                                { name: 'العضو', value: `<@${targetMember.id}>`, inline: false }
+                            )
+                            .setColor(0x00FF00)
+                            .setFooter({ text: FOOTER_TEXT })
+                            .setTimestamp();
+                        logChannel.send({ embeds: [logEmbed] }).catch(() => {});
+                    }
                 } else {
                     await targetMember.roles.remove(settings.verifyRoleId).catch(() => {});
                     await targetMember.roles.add(settings.unverifyRoleId);
                     await interaction.reply({ content: `⚠️ تم سحب التفعيل من العضو بنجاح!`, ephemeral: true });
+                    if (logChannel) {
+                        const logEmbed = new EmbedBuilder()
+                            .setTitle('🔴 لوق سحب التفعيل')
+                            .addFields(
+                                { name: 'الإداري', value: `<@${interaction.user.id}>`, inline: false },
+                                { name: 'العضو', value: `<@${targetMember.id}>`, inline: false }
+                            )
+                            .setColor(0xFF0000)
+                            .setFooter({ text: FOOTER_TEXT })
+                            .setTimestamp();
+                        logChannel.send({ embeds: [logEmbed] }).catch(() => {});
+                    }
                 }
             } catch (error) {
                 return interaction.reply({ content: `❌ تأكد من صحة آيدي العضو أو صلاحيات البوت.`, ephemeral: true });
