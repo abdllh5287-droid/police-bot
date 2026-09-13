@@ -17,10 +17,8 @@ const client = new Client({
 
 const serverSettings = new Map(); 
 const activeSessions = new Map(); 
-// تخزين إحصائيات الساعات الأسبوعية لكل عضو: guildId -> Map(userId -> { totalMs, lastReset })
 const weeklyStats = new Map();
 
-// تخزين إعدادات التفعيل المؤقتة أثناء الاختيار
 const tempDoomsSetup = new Map();
 const doomsSettings = new Map();
 
@@ -44,7 +42,7 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('hours')
-        .setDescription('عرض مجموع ساعات وقْت خدمة العضو خلال الأسبوع الحالي')
+        .setDescription('عرض مجموع ساعات وقت خدمة العضو خلال الأسبوع الحالي')
         .addStringOption(option => option.setName('user_id').setDescription('آيدي العضو المراد الاستعلام عنه').setRequired(true)),
 
     new SlashCommandBuilder()
@@ -63,7 +61,6 @@ client.once('ready', async () => {
     }
 });
 
-// دالة لتصفير الساعات أسبوعياً والتحقق من وقت الخدمة
 function addWeeklyTime(guildId, userId, timeToAdd) {
     if (!weeklyStats.has(guildId)) weeklyStats.set(guildId, new Map());
     const guildMap = weeklyStats.get(guildId);
@@ -73,7 +70,6 @@ function addWeeklyTime(guildId, userId, timeToAdd) {
 
     let userData = guildMap.get(userId) || { totalMs: 0, lastReset: now };
 
-    // إذا مر أكثر من أسبوع يتم تصفير الساعات أوتوماتيكياً
     if (now - userData.lastReset > oneWeekMs) {
         userData.totalMs = 0;
         userData.lastReset = now;
@@ -247,10 +243,14 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // معالجة اختيار الرتب عبر القوائم المنسدلة
+    // معالجة اختيار الرتب عبر القوائم المنسدلة مع منع الـ Timeout
     if (interaction.isRoleSelectMenu()) {
+        await interaction.deferUpdate(); // منع حدوث خطأ التأخير 3 ثواني من ديسكورد
+
         const setupData = tempDoomsSetup.get(interaction.user.id);
-        if (!setupData) return interaction.reply({ content: '❌ انتهت الجلسة، يرجى إعادة كتابة أمر `/dooms`.', ephemeral: true });
+        if (!setupData) {
+            return interaction.followUp({ content: '❌ انتهت الجلسة، يرجى إعادة كتابة أمر `/dooms`.', ephemeral: true });
+        }
 
         if (interaction.customId === 'select_verify_role') {
             setupData.verifyRoleId = interaction.values[0];
@@ -263,7 +263,7 @@ client.on('interactionCreate', async interaction => {
                     .setMaxValues(1)
             );
 
-            return await interaction.update({
+            return await interaction.editReply({
                 content: '🛡️ تم حفظ رتبة التفعيل بنجاح!\nالآن من القائمة أسفله، اختر **رتبة السحب (غير الموافق)**:',
                 components: [row2]
             });
@@ -283,7 +283,7 @@ client.on('interactionCreate', async interaction => {
 
             const targetChannel = interaction.guild.channels.cache.get(setupData.verifyChannelId);
             if (!targetChannel) {
-                return interaction.update({ content: '❌ لم يتم العثور على روم التفعيل المحدد، تأكد من الآيدي!', components: [] });
+                return interaction.editReply({ content: '❌ لم يتم العثور على روم التفعيل المحدد، تأكد من الآيدي!', components: [] });
             }
 
             const embed = new EmbedBuilder()
@@ -298,7 +298,7 @@ client.on('interactionCreate', async interaction => {
             );
 
             await targetChannel.send({ embeds: [embed], components: [row] });
-            return await interaction.update({ content: '✅ تم إعداد نظام التفعيل واختيار الرتب وإرسال لوحة الأزرار بنجاح تام!', components: [] });
+            return await interaction.editReply({ content: '✅ تم إعداد نظام التفعيل واختيار الرتب وإرسال لوحة الأزرار بنجاح تام!', components: [] });
         }
     }
 
@@ -325,7 +325,6 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// نظام الرسائل (تسجيل دخول، خروج، غفوة، عودة) مع الحساب التلقائي للساعات الأسبوعية
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
 
@@ -392,7 +391,6 @@ client.on('messageCreate', async message => {
         const totalElapsedTime = now - session.loginTime;
         const netServiceTime = Math.max(0, totalElapsedTime - totalBreak);
 
-        // إضافة الساعات لسجلات الأسبوع أوتوماتيكياً
         addWeeklyTime(guildId, userId, netServiceTime);
 
         const totalSeconds = Math.floor(netServiceTime / 1000);
