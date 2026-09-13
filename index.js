@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder, RoleSelectMenuBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, EmbedBuilder, RoleSelectMenuBuilder, PermissionFlagsBits } = require('discord.js');
 const express = require('express');
 
 const app = express();
@@ -15,7 +15,7 @@ const client = new Client({
     ]
 });
 
-const serverSettings = new Map(); 
+const serverSettings = new Map(); // guildId -> { login: Set, logout: Set, break: Set, logChannel: null }
 const activeSessions = new Map(); 
 const weeklyStats = new Map();
 
@@ -29,6 +29,11 @@ const commands = [
         .setName('add-login')
         .setDescription('إضافة روم مخصص لتسجيل الدخول')
         .addChannelOption(option => option.setName('channel').setDescription('اختر روم تسجيل الدخول').setRequired(true)),
+    
+    new SlashCommandBuilder()
+        .setName('remove-login')
+        .setDescription('إزالة روم من رومات تسجيل الدخول')
+        .addChannelOption(option => option.setName('channel').setDescription('اختر الروم المراد إزالته').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('add-logout')
@@ -36,9 +41,19 @@ const commands = [
         .addChannelOption(option => option.setName('channel').setDescription('اختر روم تسجيل الخروج').setRequired(true)),
 
     new SlashCommandBuilder()
+        .setName('remove-logout')
+        .setDescription('إزالة روم من رومات تسجيل الخروج')
+        .addChannelOption(option => option.setName('channel').setDescription('اختر الروم المراد إزالته').setRequired(true)),
+
+    new SlashCommandBuilder()
         .setName('add-break')
         .setDescription('إضافة روم مخصص للغفوة والعودة')
         .addChannelOption(option => option.setName('channel').setDescription('اختر روم البريك').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('remove-break')
+        .setDescription('إزالة روم من رومات البريك')
+        .addChannelOption(option => option.setName('channel').setDescription('اختر الروم المراد إزالته').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('hours')
@@ -47,7 +62,30 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('dooms')
-        .setDescription('إعداد نظام التفعيل والأزرار في السيرفر باحترافية')
+        .setDescription('إعداد نظام التفعيل والأزرار في السيرفر باحترافية'),
+
+    // الأوامر الأمنية والإدارية الجديدة
+    new SlashCommandBuilder()
+        .setName('check-member')
+        .setDescription('حماية ومراقبة: فحص معلومات الحساب وتاريخ إنشائه لكشف الوهميين')
+        .addUserOption(option => option.setName('target').setDescription('اختر العضو للفحص').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('ban')
+        .setDescription('حماية السيرفر: حظر عضو مخرب مع إرسال لوق')
+        .addUserOption(option => option.setName('target').setDescription('العضو المراد حظره').setRequired(true))
+        .addStringOption(option => option.setName('reason').setDescription('سبب الحظر').setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('kick')
+        .setDescription('حماية السيرفر: طرد عضو من السيرفر')
+        .addUserOption(option => option.setName('target').setDescription('العضو المراد طرده').setRequired(true))
+        .addStringOption(option => option.setName('reason').setDescription('سبب الطرد').setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('clear')
+        .setDescription('مسح الرسائل السريعة في الروم لتنظيفه')
+        .addIntegerOption(option => option.setName('count').setDescription('عدد الرسائل المراد مسحها (من 1 إلى 100)').setRequired(true))
 ].map(command => command.toJSON());
 
 client.once('ready', async () => {
@@ -60,6 +98,17 @@ client.once('ready', async () => {
         console.error(error);
     }
 });
+
+function getGuildSettings(guildId) {
+    if (!serverSettings.has(guildId)) {
+        serverSettings.set(guildId, {
+            login: new Set(),
+            logout: new Set(),
+            break: new Set()
+        });
+    }
+    return serverSettings.get(guildId);
+}
 
 function addWeeklyTime(guildId, userId, timeToAdd) {
     if (!weeklyStats.has(guildId)) weeklyStats.set(guildId, new Map());
@@ -79,33 +128,98 @@ function addWeeklyTime(guildId, userId, timeToAdd) {
     guildMap.set(userId, userData);
 }
 
+// لوق انضمام الأعضاء للسيرفر (حماية وتعقب)
+client.on('guildMemberAdd', async member => {
+    const doomsConf = doomsSettings.get(member.guild.id);
+    if (!doomsConf || !doomsConf.logChannelId) return;
+    const logChannel = member.guild.channels.cache.get(doomsConf.logChannelId);
+    if (!logChannel) return;
+
+    const embed = new EmbedBuilder()
+        .setTitle('📥 انضمام عضو جديد للسيرفر')
+        .setDescription(`العضو: <@${member.id}>\nالآيدي: \`${member.id}\``)
+        .addFields({ name: '📅 تاريخ إنشاء الحساب', value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`, inline: false })
+        .setColor(0x00FF00)
+        .setFooter({ text: FOOTER_TEXT })
+        .setTimestamp();
+
+    logChannel.send({ embeds: [embed] }).catch(() => {});
+});
+
+// لوق خروج الأعضاء من السيرفر
+client.on('guildMemberRemove', async member => {
+    const doomsConf = doomsSettings.get(member.guild.id);
+    if (!doomsConf || !doomsConf.logChannelId) return;
+    const logChannel = member.guild.channels.cache.get(doomsConf.logChannelId);
+    if (!logChannel) return;
+
+    const embed = new EmbedBuilder()
+        .setTitle('📤 خروج عضو من السيرفر')
+        .setDescription(`العضو: ${member.user.tag}\nالآيدي: \`${member.id}\``)
+        .setColor(0xFF0000)
+        .setFooter({ text: FOOTER_TEXT })
+        .setTimestamp();
+
+    logChannel.send({ embeds: [embed] }).catch(() => {});
+});
+
 client.on('interactionCreate', async interaction => {
     if (interaction.isChatInputCommand()) {
         const { commandName, options, guildId } = interaction;
         
-        if (!interaction.member.permissions.has('Administrator')) {
+        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator) && !['check-member', 'clear'].includes(commandName)) {
             return interaction.reply({ content: '❌ عذراً، هذا الأمر مخصص للمسؤولين فقط.', ephemeral: true });
         }
 
-        let settings = serverSettings.get(guildId) || { login: null, logout: null, break: null };
+        const settings = getGuildSettings(guildId);
 
         if (commandName === 'add-login') {
             const channel = options.getChannel('channel');
-            settings.login = channel.id;
-            serverSettings.set(guildId, settings);
-            return interaction.reply({ content: `✅ تم تعيين روم تسجيل الدخول بنجاح إلى: ${channel}`, ephemeral: true });
-        } 
+            if (settings.login.has(channel.id)) {
+                return interaction.reply({ content: `⚠️ هذا الروم (${channel}) مضاف من قبل في قائمة تسجيل الدخول!`, ephemeral: true });
+            }
+            settings.login.add(channel.id);
+            return interaction.reply({ content: `✅ تم إضافة روم تسجيل الدخول بنجاح: ${channel}`, ephemeral: true });
+        }
+        else if (commandName === 'remove-login') {
+            const channel = options.getChannel('channel');
+            if (!settings.login.has(channel.id)) {
+                return interaction.reply({ content: `❌ هذا الروم غير موجود أساساً في رومات تسجيل الدخول!`, ephemeral: true });
+            }
+            settings.login.delete(channel.id);
+            return interaction.reply({ content: `🗑️ تم إزالة الروم بنجاح من تسجيل الدخول: ${channel}`, ephemeral: true });
+        }
         else if (commandName === 'add-logout') {
             const channel = options.getChannel('channel');
-            settings.logout = channel.id;
-            serverSettings.set(guildId, settings);
-            return interaction.reply({ content: `✅ تم تعيين روم تسجيل الخروج بنجاح إلى: ${channel}`, ephemeral: true });
-        } 
+            if (settings.logout.has(channel.id)) {
+                return interaction.reply({ content: `⚠️ هذا الروم (${channel}) مضاف من قبل في قائمة تسجيل الخروج!`, ephemeral: true });
+            }
+            settings.logout.add(channel.id);
+            return interaction.reply({ content: `✅ تم إضافة روم تسجيل الخروج بنجاح: ${channel}`, ephemeral: true });
+        }
+        else if (commandName === 'remove-logout') {
+            const channel = options.getChannel('channel');
+            if (!settings.logout.has(channel.id)) {
+                return interaction.reply({ content: `❌ هذا الروم غير موجود أساساً في رومات تسجيل الخروج!`, ephemeral: true });
+            }
+            settings.logout.delete(channel.id);
+            return interaction.reply({ content: `🗑️ تم إزالة الروم بنجاح من تسجيل الخروج: ${channel}`, ephemeral: true });
+        }
         else if (commandName === 'add-break') {
             const channel = options.getChannel('channel');
-            settings.break = channel.id;
-            serverSettings.set(guildId, settings);
-            return interaction.reply({ content: `✅ تم تعيين روم البريك بنجاح إلى: ${channel}`, ephemeral: true });
+            if (settings.break.has(channel.id)) {
+                return interaction.reply({ content: `⚠️ هذا الروم (${channel}) مضاف من قبل في قائمة البريك!`, ephemeral: true });
+            }
+            settings.break.add(channel.id);
+            return interaction.reply({ content: `✅ تم إضافة روم البريك بنجاح: ${channel}`, ephemeral: true });
+        }
+        else if (commandName === 'remove-break') {
+            const channel = options.getChannel('channel');
+            if (!settings.break.has(channel.id)) {
+                return interaction.reply({ content: `❌ هذا الروم غير موجود أساساً في رومات البريك!`, ephemeral: true });
+            }
+            settings.break.delete(channel.id);
+            return interaction.reply({ content: `🗑️ تم إزالة الروم بنجاح من البريك: ${channel}`, ephemeral: true });
         }
         else if (commandName === 'hours') {
             const targetId = options.getString('user_id');
@@ -163,6 +277,99 @@ client.on('interactionCreate', async interaction => {
             );
 
             return await interaction.showModal(modal);
+        }
+        // تنفيذ الأوامر الأمنية الجديدة
+        else if (commandName === 'check-member') {
+            const target = options.getMember('target');
+            if (!target) return interaction.reply({ content: '❌ العضو غير موجود في السيرفر!', ephemeral: true });
+
+            const createdTimestamp = Math.floor(target.user.createdTimestamp / 1000);
+            const joinedTimestamp = Math.floor(target.joinedTimestamp / 1000);
+
+            const embed = new EmbedBuilder()
+                .setTitle('🛡️ تقرير حماية ومراقبة الحساب')
+                .setThumbnail(target.user.displayAvatarURL({ dynamic: true }))
+                .addFields(
+                    { name: '👤 اسم العضو', value: `${target.user.tag} (<@${target.id}>)`, inline: false },
+                    { name: '🆔 الآيدي', value: `\`${target.id}\``, inline: false },
+                    { name: '📅 تاريخ إنشاء حساب ديسكورد', value: `<t:${createdTimestamp}:F>\n(<t:${createdTimestamp}:R>)`, inline: false },
+                    { name: '📥 تاريخ الانضمام للسيرفر', value: `<t:${joinedTimestamp}:F>\n(<t:${joinedTimestamp}:R>)`, inline: false }
+                )
+                .setColor(0x00FFFF)
+                .setFooter({ text: FOOTER_TEXT })
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+        else if (commandName === 'ban') {
+            const target = options.getMember('target');
+            const reason = options.getString('reason') || 'بدون سبب محدد';
+
+            if (!target.bannable) {
+                return interaction.reply({ content: '❌ لا يمكنني حظر هذا العضو، تأكد أن رتبة البوت أعلى منه!', ephemeral: true });
+            }
+
+            await target.ban({ reason });
+            await interaction.reply({ content: `✅ تم حظر العضو بنجاح.`, ephemeral: true });
+
+            const settingsDooms = doomsSettings.get(guildId);
+            if (settingsDooms && settingsDooms.logChannelId) {
+                const logChan = interaction.guild.channels.cache.get(settingsDooms.logChannelId);
+                if (logChan) {
+                    const banEmbed = new EmbedBuilder()
+                        .setTitle('🚨 لوق حظر عضو (Ban)')
+                        .addFields(
+                            { name: 'المسؤول', value: `<@${interaction.user.id}>`, inline: false },
+                            { name: 'العضو المحظور', value: `<@${target.id}>`, inline: false },
+                            { name: 'السبب', value: reason, inline: false }
+                        )
+                        .setColor(0xFF0000)
+                        .setFooter({ text: FOOTER_TEXT })
+                        .setTimestamp();
+                    logChan.send({ embeds: [banEmbed] });
+                }
+            }
+        }
+        else if (commandName === 'kick') {
+            const target = options.getMember('target');
+            const reason = options.getString('reason') || 'بدون سبب محدد';
+
+            if (!target.kickable) {
+                return interaction.reply({ content: '❌ لا يمكنني طرد هذا العضو، تأكد أن رتبة البوت أعلى منه!', ephemeral: true });
+            }
+
+            await target.kick(reason);
+            await interaction.reply({ content: `✅ تم طرد العضو بنجاح.`, ephemeral: true });
+
+            const settingsDooms = doomsSettings.get(guildId);
+            if (settingsDooms && settingsDooms.logChannelId) {
+                const logChan = interaction.guild.channels.cache.get(settingsDooms.logChannelId);
+                if (logChan) {
+                    const kickEmbed = new EmbedBuilder()
+                        .setTitle('⚠️ لوق طرد عضو (Kick)')
+                        .addFields(
+                            { name: 'المسؤول', value: `<@${interaction.user.id}>`, inline: false },
+                            { name: 'العضو المطرود', value: `<@${target.id}>`, inline: false },
+                            { name: 'السبب', value: reason, inline: false }
+                        )
+                        .setColor(0xFFA500)
+                        .setFooter({ text: FOOTER_TEXT })
+                        .setTimestamp();
+                    logChan.send({ embeds: [kickEmbed] });
+                }
+            }
+        }
+        else if (commandName === 'clear') {
+            const count = options.getInteger('count');
+            if (count < 1 || count > 100) {
+                return interaction.reply({ content: '❌ يجب تحديد عدد الرسائل بين 1 و 100!', ephemeral: true });
+            }
+
+            await interaction.channel.bulkDelete(count, true).catch(() => {
+                return interaction.reply({ content: '❌ حدث خطأ، ربما تكون الرسائل أقدم من 14 يوم.', ephemeral: true });
+            });
+
+            return interaction.reply({ content: `🧹 تم مسح **${count}** رسالة بنجاح.`, ephemeral: true });
         }
     }
 
@@ -243,9 +450,8 @@ client.on('interactionCreate', async interaction => {
         }
     }
 
-    // معالجة اختيار الرتب عبر القوائم المنسدلة مع منع الـ Timeout
     if (interaction.isRoleSelectMenu()) {
-        await interaction.deferUpdate(); // منع حدوث خطأ التأخير 3 ثواني من ديسكورد
+        await interaction.deferUpdate();
 
         const setupData = tempDoomsSetup.get(interaction.user.id);
         if (!setupData) {
@@ -334,11 +540,14 @@ client.on('messageCreate', async message => {
     const channelId = message.channel.id;
     const now = Date.now();
 
-    const settings = serverSettings.get(guildId) || { login: null, logout: null, break: null };
+    const settings = getGuildSettings(guildId);
 
     if (content === 'تسجيل دخول') {
-        if (!settings.login) return message.reply('❌ لم يتم تعيين روم تسجيل الدخول في هذا السيرفر بعد!');
-        if (channelId !== settings.login) return message.reply(`❌ يرجى استخدام أمر "تسجيل دخول" في الروم المخصص له فقط: <#${settings.login}>`);
+        if (settings.login.size === 0) return message.reply('❌ لم يتم تعيين أي روم لتسجيل الدخول في هذا السيرفر بعد!');
+        if (!settings.login.has(channelId)) {
+            const channelsFormatted = Array.from(settings.login).map(id => `<#${id}>`).join(', ');
+            return message.reply(`❌ يرجى استخدام أمر "تسجيل دخول" في أحد الرومات المخصصة له فقط:\n${channelsFormatted}`);
+        }
         if (activeSessions.has(userId)) return message.reply('❌ أنت مسجل دخول بالفعل!');
 
         activeSessions.set(userId, {
@@ -352,8 +561,11 @@ client.on('messageCreate', async message => {
     }
 
     if (content === 'غفوة') {
-        if (!settings.break) return message.reply('❌ لم يتم تعيين روم البريك في هذا السيرفر بعد!');
-        if (channelId !== settings.break) return message.reply(`❌ يرجى استخدام أمر "غفوة" في روم البريك المخصص فقط: <#${settings.break}>`);
+        if (settings.break.size === 0) return message.reply('❌ لم يتم تعيين أي روم للبريك في هذا السيرفر بعد!');
+        if (!settings.break.has(channelId)) {
+            const channelsFormatted = Array.from(settings.break).map(id => `<#${id}>`).join(', ');
+            return message.reply(`❌ يرجى استخدام أمر "غفوة" في أحد رومات البريك المخصصة فقط:\n${channelsFormatted}`);
+        }
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
         if (session.isBreak) return message.reply('⚠️ أنت في بريك بالفعل!');
@@ -364,8 +576,11 @@ client.on('messageCreate', async message => {
     }
 
     if (content === 'عودة') {
-        if (!settings.break) return message.reply('❌ لم يتم تعيين روم البريك في هذا السيرفر بعد!');
-        if (channelId !== settings.break) return message.reply(`❌ يرجى استخدام أمر "عودة" في روم البريك المخصص فقط: <#${settings.break}>`);
+        if (settings.break.size === 0) return message.reply('❌ لم يتم تعيين أي روم للبريك في هذا السيرفر بعد!');
+        if (!settings.break.has(channelId)) {
+            const channelsFormatted = Array.from(settings.break).map(id => `<#${id}>`).join(', ');
+            return message.reply(`❌ يرجى استخدام أمر "عودة" في أحد رومات البريك المخصصة فقط:\n${channelsFormatted}`);
+        }
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
         if (!session.isBreak) return message.reply('⚠️ أنت لست في بريك أساساً!');
@@ -378,8 +593,11 @@ client.on('messageCreate', async message => {
     }
 
     if (content === 'تسجيل خروج') {
-        if (!settings.logout) return message.reply('❌ لم يتم تعيين روم تسجيل الخروج في هذا السيرفر بعد!');
-        if (channelId !== settings.logout) return message.reply(`❌ يرجى استخدام أمر "تسجيل خروج" في الروم المخصص له فقط: <#${settings.logout}>`);
+        if (settings.logout.size === 0) return message.reply('❌ لم يتم تعيين أي روم لتسجيل الخروج في هذا السيرفر بعد!');
+        if (!settings.logout.has(channelId)) {
+            const channelsFormatted = Array.from(settings.logout).map(id => `<#${id}>`).join(', ');
+            return message.reply(`❌ يرجى استخدام أمر "تسجيل خروج" في أحد الرومات المخصصة له فقط:\n${channelsFormatted}`);
+        }
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
 
