@@ -36,13 +36,11 @@ const commands = [
         .setName('help')
         .setDescription('عرض لوحة المساعدة والأوامر الاحترافية الخاصة بالبوت'),
     
-    // أمر موحد لإضافة الروم للثلاث قوائم مع بعض
     new SlashCommandBuilder()
         .setName('add-room')
         .setDescription('إضافة روم شامل لتسجيل (الدخول، الخروج، والبريك) دفعة واحدة')
         .addChannelOption(o => o.setName('channel').setDescription('اختر الروم المراد إضافته').setRequired(true)),
     
-    // أمر موحد لإزالة الروم من الثلاث قوائم مع بعض
     new SlashCommandBuilder()
         .setName('remove-room')
         .setDescription('إزالة الروم من جميع قوائم الخدمة دفعة واحدة')
@@ -51,7 +49,7 @@ const commands = [
     new SlashCommandBuilder()
         .setName('hours')
         .setDescription('عرض ساعات خدمة العضو الأسبوعية')
-        .addStringOption(o => o.setName('user_id').setDescription('آيدي العضو').setRequired(true)),
+        .addUserOption(o => o.setName('target').setDescription('العضو المراد فحص ساعاته').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('dooms')
@@ -315,16 +313,20 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ content: '❌ عذراً، هذه الأوامر مخصصة للمسؤولين فقط.', ephemeral: true });
         }
 
-        // أمر إضافة الروم للثلاثة مع بعض دفعة واحدة
         if (commandName === 'add-room') {
             const channel = options.getChannel('channel');
+            
+            // التحقق مما إذا كان الروم مضافاً مسبقاً
+            if (settings.login.has(channel.id) && settings.logout.has(channel.id) && settings.break.has(channel.id)) {
+                return interaction.reply({ content: `⚠️ هذا الروم (${channel}) مضاف مسبقاً كـ روم شامل للخدمة!`, ephemeral: true });
+            }
+
             settings.login.add(channel.id);
             settings.logout.add(channel.id);
             settings.break.add(channel.id);
             return interaction.reply({ content: `✅ تم إضافة الروم (${channel}) بنجاح كـ روم شامل **(تسجيل دخول، تسجيل خروج، بريك)**!`, ephemeral: true });
         }
         
-        // أمر إزالة الروم من الثلاثة مع بعض دفعة واحدة
         else if (commandName === 'remove-room') {
             const channel = options.getChannel('channel');
             settings.login.delete(channel.id);
@@ -333,7 +335,8 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ content: `🗑️ تم إزالة الروم (${channel}) من جميع قوائم الخدمة بنجاح.`, ephemeral: true });
         }
         else if (commandName === 'hours') {
-            const targetId = options.getString('user_id');
+            const targetUser = options.getUser('target');
+            const targetId = targetUser.id;
             const guildMap = weeklyStats.get(guildId);
             let totalMs = 0;
             if (guildMap && guildMap.has(targetId)) {
