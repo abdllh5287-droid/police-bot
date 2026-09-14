@@ -36,35 +36,17 @@ const commands = [
         .setName('help')
         .setDescription('عرض لوحة المساعدة والأوامر الاحترافية الخاصة بالبوت'),
     
+    // أمر موحد لإضافة الروم للثلاث قوائم مع بعض
     new SlashCommandBuilder()
-        .setName('add-login')
-        .setDescription('إضافة روم مخصص لتسجيل الدخول')
-        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
+        .setName('add-room')
+        .setDescription('إضافة روم شامل لتسجيل (الدخول، الخروج، والبريك) دفعة واحدة')
+        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم المراد إضافته').setRequired(true)),
     
+    // أمر موحد لإزالة الروم من الثلاث قوائم مع بعض
     new SlashCommandBuilder()
-        .setName('remove-login')
-        .setDescription('إزالة روم من رومات تسجيل الدخول')
-        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('add-logout')
-        .setDescription('إضافة روم مخصص لتسجيل الخروج')
-        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('remove-logout')
-        .setDescription('إزالة روم من رومات تسجيل الخروج')
-        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('add-break')
-        .setDescription('إضافة روم مخصص للبريك')
-        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
-
-    new SlashCommandBuilder()
-        .setName('remove-break')
-        .setDescription('إزالة روم من رومات البريك')
-        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم').setRequired(true)),
+        .setName('remove-room')
+        .setDescription('إزالة الروم من جميع قوائم الخدمة دفعة واحدة')
+        .addChannelOption(o => o.setName('channel').setDescription('اختر الروم المراد إزالته').setRequired(true)),
 
     new SlashCommandBuilder()
         .setName('hours')
@@ -182,12 +164,14 @@ function addWeeklyTime(guildId, userId, timeToAdd) {
     guildMap.set(userId, userData);
 }
 
+// نظام التحضير بالكتابة (تسجيل دخول، غفوة، عودة، تسجيل خروج) + حماية الروابط
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
 
     const guildId = message.guild.id;
     const settings = getGuildSettings(guildId);
 
+    // نظام حماية الروابط
     if (settings.protection.antiLink && !message.member.permissions.has(PermissionFlagsBits.Administrator)) {
         if (message.content.includes('http://') || message.content.includes('https://') || message.content.includes('discord.gg/')) {
             await message.delete().catch(() => {});
@@ -201,8 +185,8 @@ client.on('messageCreate', async message => {
     const now = Date.now();
 
     if (content === 'تسجيل دخول') {
-        if (settings.login.size === 0) return message.reply('❌ لم يتم تعيين أي روم لتسجيل الدخول!');
-        if (!settings.login.has(channelId)) return message.reply('❌ يرجى استخدام الأمر في رومات تسجيل الدخول المخصصة فقط.');
+        if (settings.login.size === 0) return message.reply('❌ لم يتم تعيين أي روم مخصص للخدمة بعد!');
+        if (!settings.login.has(channelId)) return message.reply('❌ يرجى استخدام الأمر في الروم المخصص للخدمة فقط.');
         if (activeSessions.has(userId)) return message.reply('❌ أنت مسجل دخول بالفعل!');
 
         activeSessions.set(userId, { 
@@ -217,7 +201,7 @@ client.on('messageCreate', async message => {
 
     if (content === 'غفوة') {
         if (settings.break.size === 0) return message.reply('❌ لم يتم تعيين رومات للبريك!');
-        if (!settings.break.has(channelId)) return message.reply('❌ استخدم الأمر في رومات البريك المخصصة فقط.');
+        if (!settings.break.has(channelId)) return message.reply('❌ استخدم الأمر في الروم المخصص فقط.');
         
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
@@ -230,7 +214,7 @@ client.on('messageCreate', async message => {
 
     if (content === 'عودة') {
         if (settings.break.size === 0) return message.reply('❌ لم يتم تعيين رومات للبريك!');
-        if (!settings.break.has(channelId)) return message.reply('❌ استخدم الأمر في رومات البريك المخصصة فقط.');
+        if (!settings.break.has(channelId)) return message.reply('❌ استخدم الأمر في الروم المخصص فقط.');
         
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
@@ -244,7 +228,7 @@ client.on('messageCreate', async message => {
 
     if (content === 'تسجيل خروج') {
         if (settings.logout.size === 0) return message.reply('❌ لم يتم تعيين رومات لتسجيل الخروج!');
-        if (!settings.logout.has(channelId)) return message.reply('❌ استخدم الأمر في رومات تسجيل الخروج المخصصة فقط.');
+        if (!settings.logout.has(channelId)) return message.reply('❌ استخدم الأمر في الروم المخصص فقط.');
         
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
@@ -318,7 +302,7 @@ client.on('interactionCreate', async interaction => {
                 .addFields(
                     { name: '🛡️ أوامر الحماية والإدارة العليا', value: '`/protection`, `/ban`, `/unban`, `/timeout`, `/untimeout`, `/kick`, `/clear`, `/warning`', inline: false },
                     { name: '📋 نظام التفعيل واللوق', value: '`/dooms`', inline: false },
-                    { name: '⏱️ نظام رومات التحضير والدخول', value: '`/add-login`, `/remove-login`, `/add-logout`, `/remove-logout`, `/add-break`, `/remove-break`, `/hours`', inline: false },
+                    { name: '⏱️ نظام التحضير ( بالكتابة بالشات )', value: 'اكتب **تسجيل دخول**، **غفوة**، **عودة**، **تسجيل خروج**\n`/add-room` (لإضافة روم الخدمة الشامل)\n`/remove-room` (لإزالة روم الخدمة)\n`/hours`', inline: false },
                     { name: '📢 الإعلانات والأدوات العامة', value: '`/broadcast`, `/say`, `/avatar`, `/help`', inline: false }
                 )
                 .setColor(0x0099FF)
@@ -331,41 +315,22 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ content: '❌ عذراً، هذه الأوامر مخصصة للمسؤولين فقط.', ephemeral: true });
         }
 
-        if (commandName === 'add-login') {
+        // أمر إضافة الروم للثلاثة مع بعض دفعة واحدة
+        if (commandName === 'add-room') {
             const channel = options.getChannel('channel');
-            if (settings.login.has(channel.id)) return interaction.reply({ content: `⚠️ هذا الروم (${channel}) مضاف من قبل في قائمة تسجيل الدخول!`, ephemeral: true });
             settings.login.add(channel.id);
-            return interaction.reply({ content: `✅ تم إضافة روم تسجيل الدخول بنجاح: ${channel}`, ephemeral: true });
-        }
-        else if (commandName === 'remove-login') {
-            const channel = options.getChannel('channel');
-            if (!settings.login.has(channel.id)) return interaction.reply({ content: `❌ هذا الروم غير موجود أساساً في القائمة!`, ephemeral: true });
-            settings.login.delete(channel.id);
-            return interaction.reply({ content: `🗑️ تم إزالة الروم بنجاح: ${channel}`, ephemeral: true });
-        }
-        else if (commandName === 'add-logout') {
-            const channel = options.getChannel('channel');
-            if (settings.logout.has(channel.id)) return interaction.reply({ content: `⚠️ هذا الروم (${channel}) مضاف من قبل!`, ephemeral: true });
             settings.logout.add(channel.id);
-            return interaction.reply({ content: `✅ تم إضافة روم تسجيل الخروج: ${channel}`, ephemeral: true });
-        }
-        else if (commandName === 'remove-logout') {
-            const channel = options.getChannel('channel');
-            if (!settings.logout.has(channel.id)) return interaction.reply({ content: `❌ هذا الروم غير موجود أساساً!`, ephemeral: true });
-            settings.logout.delete(channel.id);
-            return interaction.reply({ content: `🗑️ تم إزالة الروم: ${channel}`, ephemeral: true });
-        }
-        else if (commandName === 'add-break') {
-            const channel = options.getChannel('channel');
-            if (settings.break.has(channel.id)) return interaction.reply({ content: `⚠️ هذا الروم مضاف من قبل!`, ephemeral: true });
             settings.break.add(channel.id);
-            return interaction.reply({ content: `✅ تم إضافة روم البريك: ${channel}`, ephemeral: true });
+            return interaction.reply({ content: `✅ تم إضافة الروم (${channel}) بنجاح كـ روم شامل **(تسجيل دخول، تسجيل خروج، بريك)**!`, ephemeral: true });
         }
-        else if (commandName === 'remove-break') {
+        
+        // أمر إزالة الروم من الثلاثة مع بعض دفعة واحدة
+        else if (commandName === 'remove-room') {
             const channel = options.getChannel('channel');
-            if (!settings.break.has(channel.id)) return interaction.reply({ content: `❌ هذا الروم غير موجود!`, ephemeral: true });
+            settings.login.delete(channel.id);
+            settings.logout.delete(channel.id);
             settings.break.delete(channel.id);
-            return interaction.reply({ content: `🗑️ تم إزالة روم البريك: ${channel}`, ephemeral: true });
+            return interaction.reply({ content: `🗑️ تم إزالة الروم (${channel}) من جميع قوائم الخدمة بنجاح.`, ephemeral: true });
         }
         else if (commandName === 'hours') {
             const targetId = options.getString('user_id');
@@ -513,7 +478,7 @@ client.on('interactionCreate', async interaction => {
             const modal = new ModalBuilder()
                 .setCustomId(isVerify ? 'modal_dooms_exec_verify' : 'modal_dooms_exec_unverify')
                 .setTitle(isVerify ? 'لوحة تفعيل عضو' : 'لوحة سحب التفعيل');
-            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('target_user_id').setLabel('أدخل آيدي العضو').setStyle(TextInputStyle.Short).setRequired(true)));
+            modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('target_user_id').setLabel('آيدي العضو').setStyle(TextInputStyle.Short).setRequired(true)));
             return await interaction.showModal(modal);
         }
     }
