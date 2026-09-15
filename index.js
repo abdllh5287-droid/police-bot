@@ -38,12 +38,12 @@ const commands = [
     
     new SlashCommandBuilder()
         .setName('add-room')
-        .setDescription('إضافة روم شامل لتسجيل (الدخول، الخروج، والبريك) دفعة واحدة')
+        .setDescription('إضافة روم لتسجيل (الدخول، الخروج، والبريك)')
         .addChannelOption(o => o.setName('channel').setDescription('اختر الروم المراد إضافته').setRequired(true)),
     
     new SlashCommandBuilder()
         .setName('remove-room')
-        .setDescription('إزالة الروم من جميع قوائم الخدمة دفعة واحدة')
+        .setDescription('إزالة الروم من قوائم الخدمة')
         .addChannelOption(o => o.setName('channel').setDescription('اختر الروم المراد إزالته').setRequired(true)),
 
     new SlashCommandBuilder()
@@ -134,9 +134,7 @@ client.once('ready', async () => {
 function getGuildSettings(guildId) {
     if (!serverSettings.has(guildId)) {
         serverSettings.set(guildId, {
-            login: new Set(),
-            logout: new Set(),
-            break: new Set(),
+            rooms: new Set(),
             protection: { antiLink: false, antiBot: false }
         });
     }
@@ -162,7 +160,7 @@ function addWeeklyTime(guildId, userId, timeToAdd) {
     guildMap.set(userId, userData);
 }
 
-// نظام التحضير بالكتابة (تسجيل دخول، غفوة، عودة، تسجيل خروج) + حماية الروابط
+// نظام التحضير بالكتابة داخل الرومات المحددة عبر السلاش
 client.on('messageCreate', async message => {
     if (message.author.bot || !message.guild) return;
 
@@ -177,14 +175,14 @@ client.on('messageCreate', async message => {
         }
     }
 
+    // التحقق أن الروم مضاف في نظام التحضير
+    if (!settings.rooms.has(message.channel.id)) return;
+
     const content = message.content.trim();
     const userId = message.author.id;
-    const channelId = message.channel.id;
     const now = Date.now();
 
     if (content === 'تسجيل دخول') {
-        if (settings.login.size === 0) return message.reply('❌ لم يتم تعيين أي روم مخصص للخدمة بعد!');
-        if (!settings.login.has(channelId)) return message.reply('❌ يرجى استخدام الأمر في الروم المخصص للخدمة فقط.');
         if (activeSessions.has(userId)) return message.reply('❌ أنت مسجل دخول بالفعل!');
 
         activeSessions.set(userId, { 
@@ -194,13 +192,10 @@ client.on('messageCreate', async message => {
             isBreak: false 
         });
 
-        return message.reply(`✅ تم تسجيل دخولك بنجاح.\n💤 اكتب **غفوة** للبريك و **عودة** للاستئناف.\n\n_${FOOTER_TEXT}_`);
+        return message.reply(`✅ تم تسجيل دخولك بنجاح.\n💤 اكتب **غفوة** للبريك و **عودة** للاستئناف و **تسجيل خروج** للإنهاء.\n\n_${FOOTER_TEXT}_`);
     }
 
     if (content === 'غفوة') {
-        if (settings.break.size === 0) return message.reply('❌ لم يتم تعيين رومات للبريك!');
-        if (!settings.break.has(channelId)) return message.reply('❌ استخدم الأمر في الروم المخصص فقط.');
-        
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
         if (session.isBreak) return message.reply('⚠️ أنت في بريك بالفعل!');
@@ -211,9 +206,6 @@ client.on('messageCreate', async message => {
     }
 
     if (content === 'عودة') {
-        if (settings.break.size === 0) return message.reply('❌ لم يتم تعيين رومات للبريك!');
-        if (!settings.break.has(channelId)) return message.reply('❌ استخدم الأمر في الروم المخصص فقط.');
-        
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
         if (!session.isBreak) return message.reply('⚠️ أنت لست في بريك أساساً!');
@@ -225,9 +217,6 @@ client.on('messageCreate', async message => {
     }
 
     if (content === 'تسجيل خروج') {
-        if (settings.logout.size === 0) return message.reply('❌ لم يتم تعيين رومات لتسجيل الخروج!');
-        if (!settings.logout.has(channelId)) return message.reply('❌ استخدم الأمر في الروم المخصص فقط.');
-        
         const session = activeSessions.get(userId);
         if (!session) return message.reply('❌ أنت لم تسجل دخول.');
 
@@ -300,7 +289,7 @@ client.on('interactionCreate', async interaction => {
                 .addFields(
                     { name: '🛡️ أوامر الحماية والإدارة العليا', value: '`/protection`, `/ban`, `/unban`, `/timeout`, `/untimeout`, `/kick`, `/clear`, `/warning`', inline: false },
                     { name: '📋 نظام التفعيل واللوق', value: '`/dooms`', inline: false },
-                    { name: '⏱️ نظام التحضير ( بالكتابة بالشات )', value: 'اكتب **تسجيل دخول**، **غفوة**، **عودة**، **تسجيل خروج**\n`/add-room` (لإضافة روم الخدمة الشامل)\n`/remove-room` (لإزالة روم الخدمة)\n`/hours`', inline: false },
+                    { name: '⏱️ نظام التحضير (كتابة بالشات بالروم المخصص)', value: 'اكتب **تسجيل دخول**، **غفوة**، **عودة**، **تسجيل خروج**\n`/add-room` (لإضافة روم التحضير)\n`/remove-room` (لإزالة روم التحضير)\n`/hours` (فحص الساعات)', inline: false },
                     { name: '📢 الإعلانات والأدوات العامة', value: '`/broadcast`, `/say`, `/avatar`, `/help`', inline: false }
                 )
                 .setColor(0x0099FF)
@@ -316,23 +305,21 @@ client.on('interactionCreate', async interaction => {
         if (commandName === 'add-room') {
             const channel = options.getChannel('channel');
             
-            // التحقق مما إذا كان الروم مضافاً مسبقاً
-            if (settings.login.has(channel.id) && settings.logout.has(channel.id) && settings.break.has(channel.id)) {
-                return interaction.reply({ content: `⚠️ هذا الروم (${channel}) مضاف مسبقاً كـ روم شامل للخدمة!`, ephemeral: true });
+            if (settings.rooms.has(channel.id)) {
+                return interaction.reply({ content: `⚠️ هذا الروم (${channel}) مضاف مسبقاً لروم التحضير!`, ephemeral: true });
             }
 
-            settings.login.add(channel.id);
-            settings.logout.add(channel.id);
-            settings.break.add(channel.id);
-            return interaction.reply({ content: `✅ تم إضافة الروم (${channel}) بنجاح كـ روم شامل **(تسجيل دخول، تسجيل خروج، بريك)**!`, ephemeral: true });
+            settings.rooms.add(channel.id);
+            return interaction.reply({ content: `✅ تم إضافة الروم (${channel}) بنجاح لروم التحضير! يمكن للأعضاء الآن كتابة (تسجيل دخول) فيه.`, ephemeral: true });
         }
         
         else if (commandName === 'remove-room') {
             const channel = options.getChannel('channel');
-            settings.login.delete(channel.id);
-            settings.logout.delete(channel.id);
-            settings.break.delete(channel.id);
-            return interaction.reply({ content: `🗑️ تم إزالة الروم (${channel}) من جميع قوائم الخدمة بنجاح.`, ephemeral: true });
+            if (!settings.rooms.has(channel.id)) {
+                return interaction.reply({ content: `❌ هذا الروم ليس مضافاً أساساً للقوائم!`, ephemeral: true });
+            }
+            settings.rooms.delete(channel.id);
+            return interaction.reply({ content: `🗑️ تم إزالة الروم (${channel}) من قائمة التحضير بنجاح.`, ephemeral: true });
         }
         else if (commandName === 'hours') {
             const targetUser = options.getUser('target');
